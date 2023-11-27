@@ -1,4 +1,4 @@
-# UOC_TFM: Developing tools for functional analysis of variants: from variant listing to biological interpretation
+# UOC_TFM: Developing tools for functional analysis of variants: from the variant list (VCF) to biological interpretation
 
 To use the web application, it is necessary to download it first.
 R and RStudio must be installed.
