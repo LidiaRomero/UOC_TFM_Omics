@@ -1,0 +1,363 @@
+---
+title: "Rmd for variant analysis from a VCF file: WES in a patient with renal ciliopathy syndrome"
+author: "Lídia Romero Cortadellas"
+date: "Course 2023-2024"
+output:
+ prettydoc::html_pretty:
+    toc: true
+    theme: architect
+    highlight: github
+    number_sections: true
+ pdf_document:
+    toc: true
+    toc_depth: 2
+    fig_caption: yes
+editor_options: 
+  chunk_output_type: console
+link-citations: yes
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, 
+                      comment = NA, prompt = TRUE, tidy = FALSE, 
+                      fig.width = 7, fig.height = 7, fig_caption = TRUE,
+                      cache=FALSE)
+```
+
+```{r, include=FALSE}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("VariantAnnotation")
+BiocManager::install("org.Hs.eg.db")
+BiocManager::install("TxDb.Hsapiens.UCSC.hg19.knownGene")
+BiocManager::install("AnnotationDbi")
+BiocManager::install("SNPlocs.Hsapiens.dbSNP144.GRCh37")
+BiocManager::install("BSgenome.Hsapiens.UCSC.hg19")
+BiocManager::install("PolyPhen.Hsapiens.dbSNP131")
+BiocManager::install("GO.db")
+BiocManager::install("biomaRt")
+BiocManager::install("GOstats")
+BiocManager::install("topGO")
+BiocManager::install("ReactomePA")
+BiocManager::install("clusterProfiler")
+BiocManager::install("maftools")
+```
+
+```{r,include=FALSE}
+library(lattice)
+library(BiocManager)
+library(VariantAnnotation)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+library(SNPlocs.Hsapiens.dbSNP144.GRCh37)
+library(BSgenome.Hsapiens.UCSC.hg19)
+library(dplyr)
+library(PolyPhen.Hsapiens.dbSNP131)
+library(GenomicFeatures)
+library(vcfR)
+library(GO.db)
+library(tidyr)
+library(biomaRt)
+library(devtools)
+library(GOstats)
+library(topGO)
+library(clusterProfiler)
+library(ggplot2)
+library(ReactomePA)
+library(maftools)
+```
+
+```{r, include = FALSE} 
+setwd("C:/Users/Lídia/Downloads/TFM UOC")
+```
+
+# Lectura de les dades
+
+We read the vcf file from the readVcf function of the Bioconductor VariantAnnotation package. We will save the data corresponding to a specific chromosome to ease the processing of the information.
+
+```{r}
+vcf <- readVcf("M46.snps.vcf", "hg19")
+vcf_chr <- vcf[grepl(names(vcf), pattern = "chr16:")]
+```
+
+Variant information is recorded in a VRange object. This is a regularly used GRanges object form that is part of Bioconductor. Includes chromosome, start position, end position, reference allele, and alternate allele. From the rowRanges function we extract the information.
+
+```{r}
+rd_chr <- rowRanges(vcf_chr)
+head(rd_chr)
+```
+
+# Anotació de variants 
+
+For variant annotation we first retrieve information about SNPs from the dbSNP database and cross them with the variants in our file. We must take into account that the seqlevels, seqlevelStyle and genome of the two do not match and therefore we will have to combine them. The data we work with have the variants referenced to the genome version GrCh37.
+
+```{r}
+all_snps <- SNPlocs.Hsapiens.dbSNP144.GRCh37
+tar_chr <- as.vector(seqnames(rd_chr)@values)
+tar_chr <- gsub("chr", "", tar_chr)
+tar_chr[grepl(tar_chr, pattern = "M")] <- "MT"
+tar_chr_keep <- c("1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","X","Y","MT")
+condition <- tar_chr %in% tar_chr_keep
+tar_chr <- tar_chr[condition]
+my_snps <- snpsBySeqname(all_snps, c(tar_chr))
+my_snps[1:2]
+seqlevelsStyle(my_snps) <- "UCSC"
+genome(my_snps) <- "hg19"
+```
+
+We extract information about SNPs to generate a reference data frame containing their position and ID. Next, we format our variant information into a data frame with the fields of interest. To do this we will have to break the chains of the variant. Once we have the two data frames, we can combine them to join our observed variants with their reference IDs.
+
+```{r}
+snp_ID <- data.frame(posIDX = paste0(seqnames(my_snps), ":", pos(my_snps)), rsID = my_snps$RefSNP_id,stringsAsFactors = FALSE)
+head(snp_ID)
+matV1 <- data.frame(Variant = names(rd_chr), stringsAsFactors = FALSE)
+matV1$chromosome <- gsub("(.*):(.*)_(.*)/(.*)", "\\1", matV1$Variant)
+matV1$start <- gsub("(.*):(.*)_(.*)/(.*)", "\\2", matV1$Variant)
+matV1$end <- gsub("(.*):(.*)_(.*)/(.*)", "\\2", matV1$Variant)
+matV1$ref_allele <- gsub("(.*):(.*)_(.*)/(.*)", "\\3", matV1$Variant)
+matV1$alt_allele <- gsub("(.*):(.*)_(.*)/(.*)", "\\4", matV1$Variant)
+matV1$posIDX <- gsub("(.*)_(.*)", "\\1", matV1$Variant)
+matV1[1:2, ]
+matS <- merge(matV1,snp_ID,all.x=TRUE,by="posIDX")
+matS <- dplyr::select(matS,-posIDX)
+```
+
+Based on the TxDb database, we relate the variants with the corresponding amino acid change. For this we execute the predictcoding() function providing our VCF object. It will use the ranges contained in it to search within a TxDb object. With this object we also identify in which position the variants are: 5'UTR, promoter, introns, exons, 3' UTR or intergenes.
+
+```{r}
+txdb <- TxDb.Hsapiens.UCSC.hg19.knownGene
+all <- locateVariants(vcf_chr, txdb, AllVariants())
+variants_vcf_chr <- ranges(all)
+location_variants <- mcols(all)$LOCATION
+variant_location_info <- data.frame(
+  Variant_Ranges = variants_vcf_chr,
+  Location_Info = location_variants)
+variant_location_info <- unique(variant_location_info)
+coding <- predictCoding(vcf_chr, txdb, seqSource = Hsapiens)
+head(coding, 10)
+matA <- data.frame(Variant=names(coding),
+                   chromosome=seqnames(coding),
+                   start=start(coding),end=end(coding),
+                   ref_allele=as.character(coding$REF),
+                   alt_allele=unlist(lapply(lapply(
+                   coding$ALT,`[[`,1),as.character)),
+                   GeneID=coding$GENEID,
+                   Protein_posi=unlist(lapply(lapply(
+                   coding$PROTEINLOC,`[[`,1),as.integer)),
+                   ref_AA=as.character(coding$REFAA),
+                   alt_AA=as.character(coding$VARAA),
+                   aaType = coding$CONSEQUENCE)
+
+for(i in 1:length(matA$aaType)){
+  if (matA$aaType[i] != "frameshift"){
+  matA$aaChange[i]<- paste0("p.",matA$ref_AA[i],matA$Protein_posi[i],matA$alt_AA[i])
+  }else{
+    matA$aaChange[i] <- NA
+}
+}
+head(matA)
+matA <- matA %>% distinct(Variant, .keep_all = TRUE)
+```
+
+We integrate data from SNPs (rs) and amino acid changes into the matS data frame.
+
+```{r}
+matS$GeneID <- matA$GeneID[match(matS$Variant, matA$Variant)]
+matS$Protein_posi <- matA$Protein_posi[match(matS$Variant, matA$Variant)]
+matS$ref_AA <- matA$ref_AA[match(matS$Variant, matA$Variant)]
+matS$alt_AA <- matA$alt_AA[match(matS$Variant, matA$Variant)]
+matS$aaType <- matA$aaType[match(matS$Variant, matA$Variant)]
+matS$aaChange <- matA$aaChange[match(matS$Variant, matA$Variant)]
+matS$SampleID <- rownames(colData(vcf_chr))[1]
+matS$VariantLoc <- variant_location_info$Location_Info[match(matS$Variant, variant_location_info$Variant_Ranges.names)]
+```
+
+Based on information from different databases, we enrich the variant table with other data such as the gene symbol, the prediction of polyphen pathogenicity or if the identified genes are related to a disease according to OMIM, among others. This way, the resulting table (which we have called matS) will have 28 columns.
+
+```{r, }
+entrez_ids <- matS$GeneID
+gene_symbols <- AnnotationDbi::select(org.Hs.eg.db,keys=entrez_ids, columns="SYMBOL", keytype="ENTREZID")
+matS$Gene <- gene_symbols$SYMBOL[match(matS$GeneID, gene_symbols$ENTREZID)]
+
+omim_symbol <- AnnotationDbi::select(org.Hs.eg.db,keys=entrez_ids, columns="OMIM", keytype="ENTREZID")
+matS$OMIM <- omim_symbol$OMIM[match(matS$GeneID, omim_symbol$ENTREZID)]
+
+GO_symbols <- AnnotationDbi::select(org.Hs.eg.db,keys=entrez_ids, columns="GO", keytype="ENTREZID")
+matS$GO <- GO_symbols$GO[match(matS$GeneID, omim_symbol$ENTREZID)]
+
+pp <- AnnotationDbi::select(PolyPhen.Hsapiens.dbSNP131, keys=matS$rsID,
+          cols=c("TRAININGSET", "PREDICTION", "PPH2PROB"))
+head(pp[!is.na(pp$PREDICTION), ]) 
+matS$polyphenpredict <- pp$PREDICTION[match(matS$rsID, pp$RSID)]
+
+ensembl_gene <- AnnotationDbi::select(org.Hs.eg.db,keys=entrez_ids, columns="ENSEMBL", keytype="ENTREZID")
+matS$ENSEMBL <- ensembl_gene$ENSEMBL[match(matS$GeneID, ensembl_gene$ENTREZID)]
+
+GO_ID <- matS$GO
+GO_term<- AnnotationDbi::select(GO.db,keys=GO_ID, columns="TERM", keytype="GOID")
+matS$GOterm <- GO_term$TERM[match(matS$GO, GO_term$GOID)]
+
+GO_onto <- GO_term<- AnnotationDbi::select(GO.db,keys=GO_ID, columns="ONTOLOGY", keytype="GOID")
+matS$GOOntology <- GO_onto$ONTOLOGY[match(matS$GO, GO_term$GOID)]
+
+genotypes <- geno(vcf_chr)
+genotype_data <- data.frame(genotypes$GT)
+sample_name <- names(genotype_data[1])
+matS$genotype <- genotype_data[[sample_name]][match(matS$Variant, rownames(genotype_data))]
+allelic_depth <- data.frame(genotypes$AD)
+allelic_depth <- allelic_depth[1]
+col_name <- paste("Reads", sample_name, sep = "")
+allelic_depth[[col_name]] <- format(allelic_depth[[sample_name]], big.mark = ",")
+split_allelic <- separate(allelic_depth, col_name, into = c("ReadsRef", "ReadsAlt"), sep = ",")
+matS$ReadsRef <- split_allelic$ReadsRef[match(matS$Variant, rownames(split_allelic))]
+matS$ReadsAlt <- split_allelic$ReadsAlt[match(matS$Variant, rownames(split_allelic))]
+
+gene_ids <- matS$ENSEMBL
+ensembl <- useEnsembl(biomart = "ensembl", dataset = "hsapiens_gene_ensembl")
+omim_description <- getBM(
+  attributes = c("ensembl_gene_id", "mim_morbid_description"),
+  filters = "ensembl_gene_id",
+  values = gene_ids,
+  mart = ensembl
+)
+
+omim_description_combined <- omim_description %>% group_by(ensembl_gene_id) %>% summarize(mim_morbid_description = paste(mim_morbid_description, collapse = "/ "))
+matS$DiseaseOMIM <- omim_description_combined$mim_morbid_description[match(matS$ENSEMBL, omim_description_combined$ensembl_gene_id)]
+
+getType <- function(ref, alt){
+  if(nchar(ref) == nchar(alt)){
+    if(nchar(ref) == 1){
+      return("SNP")
+    } else {
+      return("Complex variant")
+    }
+  } else if (nchar(ref) > nchar(alt)) {
+    return("Deletion")
+  } else {
+    return("Insertion")
+  }
+}
+matS$Type <- mapply(getType, matS$ref_allele, matS$alt_allele)
+
+freq_data <- useMart("ENSEMBL_MART_SNP", dataset="hsapiens_snp")
+minorallfreq <- getBM(attributes = c("refsnp_id", "minor_allele", "minor_allele_freq"), filters = "snp_filter", values = matS$rsID, mart = freq_data)
+matS$MAF <- minorallfreq$minor_allele_freq[match(matS$rsID,minorallfreq$refsnp_id)]
+```
+
+Optionally and according to the graphic representation you want to make, the data will have to be converted into other formats to be able to use the functions that generate these graphics. In this case, the annotated data has been converted to maf format to make some of the plots For this, the names of the columns of the data frame must be modified and in some cases also their content. For example, instead of chr9, we will have to change it to “9”.
+
+```{r}
+matS_maf <- matS[,c ("Gene", "chromosome", "start", "end","ref_allele", "alt_allele", "aaType", "Type", "SampleID")]
+colnames(matS_maf) <- c('Hugo_Symbol', 'Chromosome', 'Start_Position', 'End_Position', 'Reference_Allele', 'Tumor_Seq_Allele2', 'Variant_Classification', 'Variant_Type', 'Tumor_Sample_Barcode')
+matS_maf$Chromosome <- sub("^chr", "", matS_maf$Chromosome)
+matS_maf$Start_Position <- as.integer(matS_maf$Start_Position)
+matS_maf$End_Position <- as.integer(matS_maf$End_Position)
+matS_maf$Variant_Type <- ifelse(matS_maf$Variant_Type == "Deletion", "DEL",
+                                ifelse(matS_maf$Variant_Type == "Insertion", "INS", matS_maf$Variant_Type))
+matS_maf$Variant_Classification <- as.character(matS_maf$Variant_Classification)
+
+get_mutation_type <- function(ref, alt, var_type, var_class) {
+  if (is.na(var_class)) {
+    return("Missing_Classification") # Handle missing values in Variant_Classification
+  } else if (var_type == "DEL" && var_class == "frameshift") {
+    return("Frame_Shift_Del") # Frameshift deletion
+  } else if (var_type == "INS" && var_class == "frameshift") {
+    return("Frame_Shift_Ins") # Frameshift insertion
+  } else if (var_class == "nonsynonymous") {
+    if (is.na(ref) || is.na(alt)) {
+      return("Missing_Allele") # Handle missing values in Allele columns
+    } else if (nchar(ref) != nchar(alt)) {
+      if (nchar(ref) > nchar(alt)) {
+        return("In_Frame_Del") # In-frame deletion
+      } else {
+        return("In_Frame_Ins") # In-frame insertion
+      }
+    } else if (var_type == "SNP") {
+      return("Missense_Mutation") # SNP classified as Missense Mutation
+    }
+  } else if (var_class == "synonymous") {
+    return("Silent") # Synonymous mutations as Silent
+  } else if (var_class == "nonsense") {
+    return("Nonsense_Mutation") # Nonsense mutations
+  }
+  return("Other") # Other cases or unchanged rows
+}
+matS_maf$Mutation_type <- mapply(get_mutation_type, matS_maf$Reference_Allele, matS_maf$Tumor_Seq_Allele2, matS_maf$Variant_Type, matS_maf$Variant_Classification)
+matS_maf <- subset(matS_maf, select = -Variant_Classification)
+names(matS_maf)[names(matS_maf) == "Mutation_type"] <- "Variant_Classification"
+matS_maf$AAChange <- matS$aaChange[match(matS_maf$Hugo_Symbol, matS$Gene)]
+maf_object <- read.maf(maf = matS_maf)
+matS <- matS[, -which(names(matS) == "aaType")]
+matS$Variant_Classification <- matS_maf$Variant_Classification
+head(matS)
+```
+
+# Visualització de resultats
+
+We first observe the distribution of variants according to various characteristics.
+
+```{r, fig.cap = "Figura 1. Overview general del dataset WES."}
+plotmafSummary(maf = maf_object, rmOutlier = TRUE, addStat = 'median', dashboard = TRUE, titvRaw = FALSE)
+```
+
+We can also see which of the genes we previously identified have more variants (>1), in this case excluding synonyms that will not cause changes in protein function. We also exclude genes for which we do not know the name and therefore appear as NA. We also see in which functions (GO) they are involved and if they are related to any disease.
+
+```{r, fig.cap="Figura 2. Nombre de variants per gen."}
+gene_counts <- matS %>%
+  filter(!is.na(Gene), VariantLoc != "Silent") %>%
+  group_by(Gene) %>%
+  summarise(Frequency = n()) %>%
+  filter(Frequency > 1)
+
+ggplot(gene_counts, aes(x = reorder(Gene, - Frequency ),y = Frequency, fill = Gene )) +
+  geom_bar(stat = "identity") +
+  labs(title = "Non-synonymous variants per gene", x = "Gene", y = "Count") + 
+  theme(legend.position = "none")
+```
+
+```{r}
+gene_counts$GO <- matS$GOterm[match(gene_counts$Gene, matS$Gene)]
+gene_counts$disease <- matS$DiseaseOMIM[match(gene_counts$Gene, matS$Gene)]
+gene_counts[order(desc(gene_counts$Frequency)), ]
+```
+
+And of all the variants identified, where are they located within the DNA/mRNA?
+
+```{r, }
+loc_filtered <- matS %>% 
+  filter(!is.na(VariantLoc)) %>%
+  group_by(VariantLoc) %>%
+  summarise(Frequency = n())
+
+
+ggplot(loc_filtered, aes(x=reorder(VariantLoc, - Frequency), y=Frequency, fill = VariantLoc)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Localization of variants", x = "Variant Localization", y = "Count") 
+```
+
+We see how the variants are distributed along chromosome 16.
+
+```{r, fig.cap="Figura 3. Variants al llarg del cromosoma 16."}
+matS$start <- as.integer(matS$start)
+matS$end <- as.integer(matS$end)
+ggplot(matS, aes(x=chromosome, y=start, color=Type)) +
+  geom_segment(aes(xend=chromosome, yend = start, y = 0), size = 2) +
+  geom_point(size = 5, shape = "|") +
+  labs(title = "Lollipop Plot", x = "Chromosome", y ="Position") + 
+  theme_minimal() + 
+  coord_flip()
+```
+
+
+
+
+
+
+
+
+
+
+
+
