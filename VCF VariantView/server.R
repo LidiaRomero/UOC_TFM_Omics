@@ -1,6 +1,8 @@
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+
 packages_to_check <- c(
-  "shiny",
-  "BiocManager",
   "VariantAnnotation",
   "org.Hs.eg.db",
   "TxDb.Hsapiens.UCSC.hg19.knownGene",
@@ -14,15 +16,25 @@ packages_to_check <- c(
   "topGO",
   "ReactomePA",
   "maftools",
-  "clusterProfiler",
+  "clusterProfiler"
+)
+for (package in packages_to_check) {
+  if (!requireNamespace(package, quietly = TRUE)) {
+    BiocManager::install(package)
+  }
+}
+
+otherpackages_to_check <- c(
+  "shiny",
   "openxlsx",
   "gridExtra",
   "ggplot2",
   "cowplot"
 )
-for (package in packages_to_check) {
-  if (!requireNamespace(package, quietly = TRUE)) {
-    install.packages(package)
+
+for (otherpackage in otherpackages_to_check) {
+  if (!requireNamespace(otherpackage, quietly = TRUE)) {
+    install.packages(otherpackage)
   }
 }
 
