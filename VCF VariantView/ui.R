@@ -131,7 +131,7 @@ fluidPage(
             column(width=12,
                    actionButton("btn", label = "Go!", class = "run-primary"),
                    br(), br(),
-                   downloadButton("filt", label ="Save parameters used for this analysis"),
+                   downloadButton("filt", label ="Save parameters used for this analysis in .csv"),
                    br(), br(),
                    
             ) 
@@ -151,7 +151,7 @@ fluidPage(
             p(strong("Minor allele frequency"), "Introduce a MAF numeric value and either you want to search for greater or lower numbers. Decimals are represented by a '.'."),
             p(strong("Other considerations"), "If you want to eliminate one of the chosen options, just select in and once it is marked in blue, press the supress button in your keyboard. You can use either capital or small letters."),
             h4(strong("Variant analysis and storage of parameters")),
-            p("Press the Go! button to start the analysis. You can save the selected filter parameters. The analysis may require some time (indicated at the bottom right panel), please be patient. Once the processing bar has disappeared, the results will be displayed in the corresponding tabs (tabular results and graphical representations) at the top."),
+            p("Press the Go! button to start the analysis. You can save the selected filter parameters in .csv format. The analysis may require some time (indicated at the bottom right panel), please be patient. Once the processing bar has disappeared, the results will be displayed in the corresponding tabs (tabular results and graphical representations) at the top."),
             h4(strong("Clear analysis")),
             p("Press the following button if you want to clear the analysis once performed."),
             actionButton("clear", "Clear analysis")
