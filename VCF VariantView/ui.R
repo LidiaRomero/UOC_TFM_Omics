@@ -168,13 +168,13 @@ fluidPage(
     ),
     tabPanel(
       "Summary of the identified variants",
-      plotOutput("mafgraph",height = "80vh", fill=TRUE),
+      plotOutput("mafgraph",height = "80vh"),
     ),
     tabPanel(
       "Variant analysis results",
       fluidRow(
         column(width = 1, align = "center", actionButton("prev_btn", "◄")),
-        column(width = 10, align = "center", plotOutput("grid_plot", height = "80vh", fill=TRUE)),
+        column(width = 10, align = "center", plotOutput("grid_plot", height = "80vh")),
         column(width = 1, align = "center", actionButton("next_btn", "►")),
       ),
       br(), br(),
