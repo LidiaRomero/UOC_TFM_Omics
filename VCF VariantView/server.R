@@ -9,6 +9,7 @@ packages_to_check <- c(
   "AnnotationDbi",
   "SNPlocs.Hsapiens.dbSNP144.GRCh37",
   "BSgenome.Hsapiens.UCSC.hg19",
+  "vcfR",
   "PolyPhen.Hsapiens.dbSNP131",
   "GO.db",
   "biomaRt",
@@ -328,7 +329,11 @@ function(input, output, session) {
         ggplot(react, aes(x = -log10(pvalue), y = geneID)) +
           geom_point(stroke = 3) +
           geom_text(aes(label = Description), hjust = -0.1) +
-          labs(x = "-log10(P-value)", y = "Pathway geneID")
+          labs(x = "-log10(P-value)", y = "Pathway geneID") +
+          scale_y_discrete(labels = function(geneID) {
+            gsub(" ", "\n", substr(geneID, 1, 50)) 
+          }) +
+          scale_x_continuous(limits = c(min(-log10(react$pvalue)), max(-log10(react$pvalue) + 2)))  
       } else {
         ggplot() +
           annotate("text", x = 0, y = 0, label = "No enriched REACTOME pathways found", size = 6, vjust = 0.5, hjust = 0.5)
