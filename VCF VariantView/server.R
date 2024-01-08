@@ -328,7 +328,7 @@ function(input, output, session) {
       if (nrow(react) > 0) {
         ggplot(react, aes(x = -log10(pvalue), y = geneID)) +
           geom_point(stroke = 3) +
-          geom_text(aes(label = Description), hjust = -0.1) +
+          geom_text(aes(label = Description), hjust = -0.1, angle = 15) +
           labs(x = "-log10(P-value)", y = "Pathway geneID") +
           scale_y_discrete(labels = function(geneID) {
             gsub(" ", "\n", substr(geneID, 1, 50)) 
